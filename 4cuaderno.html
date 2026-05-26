@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cuaderno #4</title>
+    <style>
+        :root {
+            --book-width: 750px;
+            --book-height: 530px;
+            --bg: #0a0a0a;
+            --page-bg: #faf6ef;
+            --transition-speed: 0.7s;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Georgia', 'Times New Roman', serif;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-user-select: none;
+            overflow-x: hidden;
+            padding: 20px;
+        }
+
+        .book-wrapper {
+            position: relative;
+            width: var(--book-width);
+            height: var(--book-height);
+            overflow: hidden;
+            margin-bottom: 25px;
+            z-index: 1;
+            flex-shrink: 0;
+            border-radius: 3px;
+        }
+
+        .book {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: var(--book-width);
+            height: 100%;
+            transform-style: preserve-3d;
+            transition: transform 0.7s cubic-bezier(0.4, 0.0, 0.2, 1);
+            will-change: transform;
+            border-radius: 2px;
+        }
+
+        .book-shadow-inner {
+            position: absolute;
+            inset: 0;
+            box-shadow:
+                0 18px 50px rgba(0, 0, 0, 0.85),
+                0 0 0 1px rgba(255, 255, 255, 0.03);
+            border-radius: 3px;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* 📄 Hoja */
+        .leaf {
+            position: absolute;
+            width: 50%;
+            height: 100%;
+            right: 0;
+            top: 0;
+            transform-origin: left center;
+            transform-style: preserve-3d;
+            transition: transform var(--transition-speed) cubic-bezier(0.34, 0.62, 0.45, 0.98);
+            cursor: default;
+            background: var(--page-bg);
+            border-radius: 2px;
+        }
+
+        .leaf.flipped {
+            transform: rotateY(-180deg);
+            border-radius: 2px;
+        }
+
+        .leaf.no-transition {
+            transition: none;
+        }
+
+        .leaf .front,
+        .leaf .back {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-color: #f5f0e6;
+            image-rendering: auto;
+            border: none;
+            border-radius: 2px;
+        }
+
+        .leaf .front {
+            border-radius: 0 2px 2px 0;
+        }
+
+        .leaf .back {
+            transform: rotateY(180deg);
+            border-radius: 2px 0 0 2px;
+        }
+
+        /* 🖱️ Zonas táctiles */
+        .click-zone {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            width: 50%;
+            z-index: 300;
+            cursor: pointer;
+        }
+
+        .click-zone.left { left: 0; }
+        .click-zone.right { right: 0; }
+
+        .click-zone:hover {
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        /* 🧭 Navegación */
+        .navigation {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            z-index: 10;
+        }
+
+        .nav-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            color: #bbb;
+            width: 46px;
+            height: 46px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            outline: none;
+        }
+
+        .nav-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.45);
+            box-shadow: 0 0 25px rgba(255, 255, 255, 0.06);
+            transform: translateY(-2px);
+        }
+
+        .nav-btn:active { transform: scale(0.92); }
+
+        .nav-btn:disabled {
+            opacity: 0.2;
+            cursor: not-allowed;
+            pointer-events: none;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .nav-btn svg {
+            width: 16px;
+            height: 16px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2.5;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .page-indicator {
+            color: #999;
+            font-size: 13px;
+            letter-spacing: 1.5px;
+            min-width: 120px;
+            text-align: center;
+            font-family: 'Georgia', serif;
+            text-transform: uppercase;
+        }
+
+        @media (max-width: 640px) {
+            :root {
+                --book-width: 480px;
+                --book-height: 339px;
+            }
+        }
+
+        @media (max-width: 500px) {
+            :root {
+                --book-width: 380px;
+                --book-height: 269px;
+            }
+            .nav-btn { width: 38px; height: 38px; }
+            .nav-btn svg { width: 13px; height: 13px; }
+            .page-indicator { font-size: 11px; letter-spacing: 1px; min-width: 100px; }
+        }
+
+        @media (max-width: 400px) {
+            :root {
+                --book-width: 300px;
+                --book-height: 212px;
+            }
+            .navigation { gap: 12px; }
+        }
+        .back-home {
+    position: fixed;
+    top: 24px;
+    left: 24px;
+    z-index: 200;
+}
+.back-home .nav-btn {
+    width: 42px;
+    height: 42px;
+    background: rgba(0,0,0,0.45);
+    border: 1px solid rgba(255,255,255,0.25);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+    </style>
+</head>
+<body>
+<div class="back-home">
+    <button class="nav-btn" id="btnBack" title="Volver al archivo" aria-label="Volver">
+        <svg viewBox="0 0 24 24"><polyline points="15 4 7 12 15 20"/></svg>
+    </button>
+</div>
+    <div class="book-wrapper" id="bookWrapper">
+        <div class="book" id="book">
+            <div class="book-shadow-inner"></div>
+        </div>
+        <div class="click-zone left" id="clickLeft" title="Anterior"></div>
+        <div class="click-zone right" id="clickRight" title="Siguiente"></div>
+    </div>
+
+    <div class="navigation">
+        <button class="nav-btn" id="btnPrev" title="Anterior" aria-label="Página anterior">
+            <svg viewBox="0 0 24 24"><polyline points="15 4 7 12 15 20"/></svg>
+        </button>
+        <button class="nav-btn" id="btnNext" title="Siguiente" aria-label="Página siguiente">
+            <svg viewBox="0 0 24 24"><polyline points="9 4 17 12 9 20"/></svg>
+        </button>
+    </div>
+
+    <script>
+        // ============================================
+        // 📓 TU CUADERNO REAL (14 hojas físicas)
+        // Sustituye las URLs por las de tus escaneos.
+        // ============================================
+        const bookPages = [
+            { front: './img/4cuaderno/4Cuaderno_1.webp', back: './img/4cuaderno/4Cuaderno_2.webp' },
+            { front: './img/4cuaderno/4Cuaderno_3.webp', back: './img/4cuaderno/4Cuaderno_4.webp' },
+            { front: './img/4cuaderno/4Cuaderno_5.webp', back: './img/4cuaderno/4Cuaderno_6.webp' },
+            { front: './img/4cuaderno/4Cuaderno_7.webp', back: './img/4cuaderno/4Cuaderno_8.webp' },
+            { front: './img/4cuaderno/4Cuaderno_9.webp', back: './img/4cuaderno/4Cuaderno_10.webp' },
+            { front: './img/4cuaderno/4Cuaderno_11.webp', back: './img/4cuaderno/4Cuaderno_12.webp' },
+            { front: './img/4cuaderno/4Cuaderno_13.webp', back: './img/4cuaderno/4Cuaderno_14.webp' },
+            { front: './img/4cuaderno/4Cuaderno_15.webp', back: './img/4cuaderno/4Cuaderno_16.webp' },
+            { front: './img/4cuaderno/4Cuaderno_17.webp', back: './img/4cuaderno/4Cuaderno_18.webp' },
+            { front: './img/4cuaderno/4Cuaderno_19.webp', back: './img/4cuaderno/4Cuaderno_20.webp' },
+            { front: './img/4cuaderno/4Cuaderno_21.webp', back: './img/4cuaderno/4Cuaderno_22.webp' },
+            { front: './img/4cuaderno/4Cuaderno_23.webp', back: './img/4cuaderno/4Cuaderno_24.webp' },
+            { front: './img/4cuaderno/4Cuaderno_25.webp', back: './img/4cuaderno/4Cuaderno_26.webp' },
+            { front: './img/4cuaderno/4Cuaderno_27.webp', back: './img/4cuaderno/4Cuaderno_28.webp' }
+        ];
+
+        const bookEl = document.getElementById('book');
+        const btnPrev = document.getElementById('btnPrev');
+        const btnNext = document.getElementById('btnNext');
+        const clickLeft = document.getElementById('clickLeft');
+        const clickRight = document.getElementById('clickRight');
+        const bookWrapper = document.getElementById('bookWrapper');
+
+        let currentLeaf = 0;
+        let isAnimating = false;
+        let leaves = [];
+
+        function buildBook() {
+            bookEl.innerHTML = '<div class="book-shadow-inner"></div>';
+            leaves = [];
+
+            bookPages.forEach((page, index) => {
+                const leaf = document.createElement('div');
+                leaf.className = 'leaf';
+                leaf.setAttribute('data-index', index);
+
+                const front = document.createElement('div');
+                front.className = 'front';
+                front.style.backgroundImage = page.front ? `url('${page.front}')` : 'none';
+                if (!page.front) front.style.backgroundColor = '#e8e0d5';
+
+                const back = document.createElement('div');
+                back.className = 'back';
+                back.style.backgroundImage = page.back ? `url('${page.back}')` : 'none';
+                if (!page.back) back.style.backgroundColor = '#e8e0d5';
+
+                leaf.appendChild(front);
+                leaf.appendChild(back);
+                bookEl.appendChild(leaf);
+                leaves.push(leaf);
+            });
+
+            bookEl.style.transition = 'none';
+            bookEl.style.transform = 'translateX(-25%)';
+            bookEl.offsetHeight;
+            bookEl.style.transition = 'transform 0.7s cubic-bezier(0.4, 0.0, 0.2, 1)';
+
+            refreshZIndices();
+            updateButtons();
+        }
+
+        function refreshZIndices() {
+            leaves.forEach((leaf, index) => {
+                leaf.classList.remove('no-transition');
+                if (index < currentLeaf) {
+                    leaf.classList.add('flipped');
+                    leaf.style.zIndex = index + 1;
+                } else if (index === currentLeaf && currentLeaf < bookPages.length) {
+                    leaf.classList.remove('flipped');
+                    leaf.style.zIndex = bookPages.length + 20;
+                } else {
+                    leaf.classList.remove('flipped');
+                    leaf.style.zIndex = bookPages.length - index;
+                }
+            });
+        }
+
+        function updateBookPosition() {
+            const total = bookPages.length;
+            if (currentLeaf === 0) {
+                bookEl.style.transform = 'translateX(-25%)';
+            } else if (currentLeaf === total) {
+                bookEl.style.transform = 'translateX(25%)';
+            } else {
+                bookEl.style.transform = 'translateX(0)';
+            }
+        }
+
+        function updateButtons() {
+            btnPrev.disabled = currentLeaf === 0;
+            btnNext.disabled = currentLeaf >= bookPages.length;
+        }
+
+        function flipPage(direction) {
+            if (isAnimating) return;
+
+            if (direction === 'next' && currentLeaf < bookPages.length) {
+                isAnimating = true;
+                const leafToFlip = leaves[currentLeaf];
+                
+                // Añadimos clase flipped y ajustamos z-index temporal
+                leafToFlip.classList.add('flipped');
+                leafToFlip.style.zIndex = bookPages.length + 30;
+
+                currentLeaf++;
+                if (currentLeaf < bookPages.length) {
+                    leaves[currentLeaf].style.zIndex = bookPages.length + 20;
+                }
+
+                updateBookPosition();
+                updateButtons();
+
+                // Esperamos a que termine la transición de la hoja volteada
+                const onTransitionEnd = (e) => {
+                    if (e.propertyName === 'transform') {
+                        leafToFlip.removeEventListener('transitionend', onTransitionEnd);
+                        refreshZIndices();
+                        isAnimating = false;
+                    }
+                };
+                leafToFlip.addEventListener('transitionend', onTransitionEnd);
+
+                // Fallback por seguridad (si transitionend no se dispara)
+                setTimeout(() => {
+                    if (isAnimating) {
+                        leafToFlip.removeEventListener('transitionend', onTransitionEnd);
+                        refreshZIndices();
+                        isAnimating = false;
+                    }
+                }, 800);
+
+            } else if (direction === 'prev' && currentLeaf > 0) {
+                isAnimating = true;
+                currentLeaf--;
+                const leafToUnflip = leaves[currentLeaf];
+                
+                leafToUnflip.classList.remove('flipped');
+                leafToUnflip.style.zIndex = bookPages.length + 30;
+
+                updateBookPosition();
+                updateButtons();
+
+                const onTransitionEnd = (e) => {
+                    if (e.propertyName === 'transform') {
+                        leafToUnflip.removeEventListener('transitionend', onTransitionEnd);
+                        refreshZIndices();
+                        isAnimating = false;
+                    }
+                };
+                leafToUnflip.addEventListener('transitionend', onTransitionEnd);
+
+                setTimeout(() => {
+                    if (isAnimating) {
+                        leafToUnflip.removeEventListener('transitionend', onTransitionEnd);
+                        refreshZIndices();
+                        isAnimating = false;
+                    }
+                }, 800);
+            }
+        }
+
+        btnNext.addEventListener('click', () => flipPage('next'));
+        btnPrev.addEventListener('click', () => flipPage('prev'));
+        clickRight.addEventListener('click', (e) => { e.stopPropagation(); flipPage('next'); });
+        clickLeft.addEventListener('click', (e) => { e.stopPropagation(); flipPage('prev'); });
+
+        let touchStartX = 0, touchStartY = 0;
+        bookWrapper.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }, { passive: true });
+
+        bookWrapper.addEventListener('touchend', (e) => {
+            const dx = e.changedTouches[0].clientX - touchStartX;
+            const dy = e.changedTouches[0].clientY - touchStartY;
+            if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 30) {
+                dx < 0 ? flipPage('next') : flipPage('prev');
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                flipPage('next');
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                flipPage('prev');
+            }
+        });
+
+        buildBook();
+
+        document.getElementById('btnBack').addEventListener('click', () => {
+    window.location.href = 'index.html';
+});
+    </script>
+</body>
+</html>

@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memorias de una ciudad</title>
+    <style>
+        :root {
+            --bg: #0a0a0a;
+            /* Sombras con drop-shadow para respetar transparencias */
+            --shadow-drop: drop-shadow(0 4px 20px rgba(0, 0, 0, 0.6));
+            --shadow-drop-hover: drop-shadow(0 8px 32px rgba(0, 0, 0, 0.75));
+            --shadow-drop-drag: drop-shadow(0 16px 48px rgba(0, 0, 0, 0.85));
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            width: 100vw; height: 100vh; overflow: hidden;
+            background: var(--bg);
+            font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            cursor: grab;
+        }
+        body.grabbing { cursor: grabbing; }
+        body.dragging-card { cursor: grabbing; }
+
+        .viewport {
+            position: fixed; inset: 0; overflow: hidden;
+            background: var(--bg);
+            background-image: radial-gradient(ellipse at center,
+                    rgba(30, 30, 30, 0.4) 0%,
+                    rgba(10, 10, 10, 0.9) 70%),
+                repeating-linear-gradient(0deg,
+                    transparent, transparent 2px,
+                    rgba(255, 255, 255, 0.003) 2px,
+                    rgba(255, 255, 255, 0.003) 3px);
+            z-index: 1;
+        }
+
+        .canvas {
+            position: absolute; top: 0; left: 0;
+            width: 5000px; height: 4000px;
+            transform-origin: 0 0;
+            transform: translate3d(0px, 0px, 0px) scale(1);
+            will-change: transform;
+            z-index: 1;
+        } 
+        .canvas::before {
+            content: ''; position: absolute; inset: 0;
+            background-image:
+                linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+            background-size: 80px 80px;
+            pointer-events: none; z-index: 0;
+        }
+
+        .image-card {
+            position: absolute;
+            perspective: 800px;
+            background: transparent;
+            cursor: grab;
+            z-index: 10;
+            will-change: transform, left, top, z-index;
+        }
+        .image-card.dragging {
+            cursor: grabbing;
+            z-index: 9999 !important;
+        }
+
+        .card-inner {
+            position: relative; width: 100%; height: 100%;
+            transition: transform 0.45s cubic-bezier(0.4, 0.0, 0.2, 1);
+            transform-style: preserve-3d;
+            border-radius: 3px;
+            background: transparent;
+            /* Sin sombra aquí */
+        }
+        .card-inner.flipped { transform: rotateY(180deg); }
+
+        .card-front, .card-back {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            backface-visibility: hidden;
+            border-radius: 3px; overflow: hidden;
+            background: transparent;
+            filter: var(--shadow-drop);                /* Sombra base con drop-shadow */
+            will-change: filter;
+            transition: filter 0.2s ease;
+        }
+        .card-back {
+            transform: rotateY(180deg);
+            background-size: cover; background-position: center; background-repeat: no-repeat;
+        }
+
+        /* Estados hover y drag sobre las caras */
+        .image-card:hover .card-front,
+        .image-card:hover .card-back {
+            filter: var(--shadow-drop-hover);
+        }
+        .image-card.dragging .card-front,
+        .image-card.dragging .card-back {
+            filter: var(--shadow-drop-drag);
+        }
+
+        .card-front img, .card-back img {
+            display: block; width: 100%; height: 100%;
+            object-fit: cover;
+            pointer-events: none;
+            -webkit-user-drag: none;
+            /*user-drag: none;*/
+        }
+
+        #tooltip {
+            position: fixed; pointer-events: none;
+            background: rgba(0, 0, 0, 0.82); color: #eee;
+            padding: 5px 8px; border-radius: 6px;
+            font-size: 10px;            /* más pequeño */
+            letter-spacing: 0.03em;
+            white-space: normal;        /* varias líneas */
+            max-width: 220px;           /* ancho máximo */
+            word-wrap: break-word;
+            z-index: 10000;
+            display: none;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+            font-weight: 400;
+        }
+
+        .instructions {
+            position: fixed; top: 22px; left: 50%; transform: translateX(-50%);
+            z-index: 100; font-size: 11px; letter-spacing: 0.05em;
+            color: rgba(255, 255, 255, 0.55); pointer-events: none;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.35);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            padding: 6px 20px; border-radius: 20px;
+        }
+
+        .hud {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            z-index: 100; display: flex; align-items: center; gap: 12px;
+            background: rgba(0, 0, 0, 0.35);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            border-radius: 20px; padding: 6px 18px;
+            font-size: 11px; letter-spacing: 0.04em;
+            color: rgba(255, 255, 255, 0.55);
+            border: none; font-family: inherit; pointer-events: auto;
+        }
+        .hud span {
+            color: rgba(255, 255, 255, 0.75); font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+            min-width: 36px; text-align: center;
+        }
+        .hud button {
+            background: rgba(255, 255, 255, 0.15); border: none;
+            color: rgba(255, 255, 255, 0.8); padding: 5px 14px;
+            border-radius: 12px; cursor: pointer;
+            font-size: 11px; letter-spacing: 0.04em; font-weight: 500;
+            transition: background 0.2s, color 0.2s; white-space: nowrap;
+            font-family: inherit;
+        }
+        .hud button:hover { background: rgba(255, 255, 255, 0.25); color: #fff; }
+        .hud .divider {
+            width: 1px; height: 16px;
+            background: rgba(255, 255, 255, 0.3); border-radius: 1px;
+        }
+
+        @media (max-width: 768px) {
+            .hud { bottom: 12px; padding: 5px 14px; gap: 8px; }
+            .instructions { top: 10px; font-size: 10px; padding: 4px 14px; }
+            .hud button { padding: 4px 10px; font-size: 10px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="viewport" id="viewport">
+        <div class="canvas" id="canvas"></div>
+    </div>
+
+    <div id="tooltip"></div>
+
+    <div class="hud" id="hud">
+        <span style="opacity:0.6;">🔍</span>
+        <span id="zoomLevel">100%</span>
+        <span class="divider"></span>
+        <span style="opacity:0.6;">📐</span>
+        <span id="coords">0, 0</span>
+        <span class="divider"></span>
+        <button id="resetBtn" title="Centrar vista y restaurar zoom">↺ Reset</button>
+    </div>
+
+    <div class="instructions">
+        🖱️ Arrastra el fondo para navegar &nbsp;|&nbsp; 🔍 Scroll / pinch para zoom &nbsp;|&nbsp; 📮 Clic en algunos elementos = ver reverso &nbsp;|&nbsp; Arrastra cualquier elemento para recolocar
+    </div>
+
+    <script>
+        (function() {
+            const viewport = document.getElementById('viewport');
+            const canvas = document.getElementById('canvas');
+            const zoomLevelEl = document.getElementById('zoomLevel');
+            const coordsEl = document.getElementById('coords');
+            const resetBtn = document.getElementById('resetBtn');
+            const tooltip = document.getElementById('tooltip');
+            const body = document.body;
+
+            let panX = 0, panY = 0, zoom = 1;
+            const ZOOM_MIN = 0.15, ZOOM_MAX = 3.5;
+            const ZOOM_SENSITIVITY = 0.001;
+
+            let globalZIndex = 20;
+            let isPanning = false, isDraggingCard = false, activeCard = null;
+            let dragStartMouseX = 0, dragStartMouseY = 0;
+            let dragStartCardLeft = 0, dragStartCardTop = 0;
+            let panStartMouseX = 0, panStartMouseY = 0;
+            let panStartPanX = 0, panStartPanY = 0;
+            let mouseDownOnCard = false;
+            let cardClickStartX = 0, cardClickStartY = 0;
+            const CLICK_THRESHOLD = 3;
+            let currentTilt = 0, wasFlippedOnDrag = false;
+            const cardElements = [];
+
+            const MAX_JITTER = 150;
+
+            // ──────────────────────────────────────────────
+            // 🧱 ARRAY ÚNICO (intercala postales y stickers)
+            // ──────────────────────────────────────────────
+           const items = [
+    {
+        id: 0,
+        width: 220, height: 312,
+        baseLeft: 100, baseTop: 150,
+        frontImage: './img/postal2.webp',
+        backImage: './img/postal2b.webp',
+        tooltip: 'Villa Enriqueta. Hace muchos años se volvió un restaurante pijo y cerró al cabo de unos meses. Es innegable el valor estético que sigue teniendo...'
+    },
+    {
+        id: 'extraA',
+        width: 180, height: 130,
+        baseLeft: 700, baseTop: 150,
+        frontImage: './img/sticker1.webp',
+        backImage: './img/sticker1b.webp',
+        tooltip: 'Rasca y Gana de la ONCE. Hace tiempo que me encanta comprarlos y cada una de las veces que lo hago pienso que me van a tocar los 5.000€ (lo más alto que he ganado fueron 5€).'
+    },
+    {
+        id: 1,
+        width: 312, height: 220,
+        baseLeft: 1300, baseTop: 150,
+        frontImage: './img/postal1.webp',
+        backImage: './img/postal1b.webp',
+        tooltip: 'Monumento a Jaume I. Es el monumento más emblemático del Paseo, y aunque es bonito, no deja de ser un monumento bastante típico. Sin embargo, lo que me gusta es la zona de bancos que lo rodea, que tiene un aura de tranquilidad especial incluso en los días más concurridos del verano.'
+    },
+    {
+        id: 'extraB',
+        width: 150, height: 120,
+        baseLeft: 1900, baseTop: 150,
+        frontImage: './img/sticker2.webp',
+        tooltip: 'Ticket de desayuno de mi primera deriva con mi tía Mari. Fue un momento tan tranquilo e inspirador que me quise guardar el ticket y eso fue lo que me llevó a empezar a recoger elementos de las derivas.'
+    },
+    {
+        id: 2,
+        width: 312, height: 220,
+        baseLeft: 2500, baseTop: 150,
+        frontImage: './img/postal3.webp',
+        backImage: './img/postal3b.webp',
+        tooltip: 'Estatua del Pescador, en el extremo del Paseo. Los bancos alrededor de esta estatua tienen un aura de tranquilidad especial.'
+    },
+    {
+        id: 'extraC',
+        width: 220, height: 312,
+        baseLeft: 700, baseTop: 480,
+        frontImage: './img/sticker3.webp',
+        tooltip: 'Los dos primeros bocetos coloreados en acuarela. Me costó más de lo que me gustaría admitir simplemente atreverme a hacerlo. La primera vez que uso acuarela en muchísimo tiempo; de hecho la paleta de Winsor&Newton que me compré hace muchísimo tiempo estaba casi por estrenar...'
+    },
+    {
+        id: 4,
+        width: 312, height: 220,
+        baseLeft: 1900, baseTop: 470,
+        frontImage: './img/postal4.webp',
+        backImage: './img/postal4b.webp',
+        tooltip: 'Barca antigua. Hay varias en el Paseo, pero están destrozadas porque la gente se sube a hacerse fotos.'
+    },
+    {
+        id: 5,
+        width: 312, height: 220,
+        baseLeft: 1300, baseTop: 570,
+        frontImage: './img/postal5.webp',
+        backImage: './img/postal5b.webp',
+        tooltip: 'Fuente en la plaza Francesc Macià. Antes de que remodelaran el parque no existía ninguna fuente. Siempre iba al salir del cole, pero el nuevo diseño no me gusta nada y todos los buenos recuerdos se fueron con la remodelación.'
+    },
+    {
+        id: 6,
+        width: 312, height: 220,
+        baseLeft: 100, baseTop: 662,
+        frontImage: './img/postal6.webp',
+        backImage: './img/postal6b.webp',
+        tooltip: 'Faro de Salou. Es el elemento más antiguo del paseo, construido en 1858. Antes de que lo restauraran y pintaran de blanco estaba completamente cubierto de grafitis y tenía un aire decadente que me gustaba mucho.'
+    },
+    {
+        id: 'extraD',
+        width: 312, height: 440,
+        baseLeft: 1900, baseTop: 890,
+        frontImage: './img/1cuaderno/1cuaderno_1.webp',
+        tooltip: 'Cuaderno #1. En este cuaderno empecé a registrar únicamente elementos arquitectónicos sueltos, incluso antes de saber de la existencia de la téncica del urban sketching. Puedes hacer click para ojearlo en formato de libro digital.',
+        link: '1cuaderno.html'
+    },
+    {
+        id: 'extraE',
+        width: 312, height: 440,
+        baseLeft: 2500, baseTop: 570,
+        frontImage: './img/2cuaderno/2cuaderno__1.webp',
+        tooltip: 'Cuaderno #2. En este cuaderno hice las primeras de ilustraciones completas y experimentación de qué ilustrar y qué dejar fuera. Para no estar demasiado rato con una ilustración y tener tiempo para ir a otros lugares es importante aprender a tomar esas decisiones rápidamente. Puedes hacer click para ojearlo en formato de libro digital.',
+        link: '2cuaderno.html'
+    },
+    {
+        id: 'extraN',
+        width: 312, height: 440,
+        baseLeft: 3100, baseTop: 670,
+        frontImage: './img/3cuaderno/3Cuaderno_1.webp',
+        tooltip: 'Cuaderno #3. Esta libreta la dediqué an los estudios previos de las ilustraciones finales. Como me daba miedo empezar directamente en las hojas de acuarelas, antes estudiaba las forams generales y la esencia en este cuaderno. Es el ejemplo perfecto de "pensar con las manos".Puedes hacer click para ojearlo en formato de libro digital.',
+        link: '3cuaderno.html'
+    },
+    {
+        id: 'extraO',
+        width: 312, height: 440,
+        baseLeft: 2800, baseTop: 1270,
+        frontImage: './img/4cuaderno/4Cuaderno_1.webp',
+        tooltip: 'Cuaderno #4. Este cuaderno recoge el proceso de ideación de las piezas finales que conforman la foramlización de este proyecto. Puedes hacer click para ojearlo en formato de libro digital.',
+        link: '4cuaderno.html'
+    },
+    {
+        id: 7,
+        width: 312, height: 220,
+        baseLeft: 700, baseTop: 992,
+        frontImage: './img/postal7.webp',
+        backImage: './img/postal7b.webp',
+        tooltip: 'Plaza de las sardanas. Es tan nueva que ni siquiera la conocía. Lo que más me sorprendió es lo cuidado que está el pequeño jardín que la rodea. Lo que más me importó de esta ilustración fue el capturar esa belleza de la vegetación.'
+    },
+    {
+        id: 8,
+        width: 312, height: 220,
+        baseLeft: 100, baseTop: 1082,
+        frontImage: './img/postal8.webp',
+        backImage: './img/postal8b.webp',
+        tooltip: 'Vista de la Masia Tous. ¡Aquí es donde hice las prácticas de la carrera! Mantengo un muy buen recuerdo.'
+    },
+    {
+        id: 'extraF',
+        width: 312, height: 150,
+        baseLeft: 1300, baseTop: 990,
+        frontImage: './img/sticker4.webp',
+        tooltip: 'Boceto del "Xalet Fort". De las primeras pruebas. Me daba miedo colorearlos porque sentía que la iba a cagar.'
+    },
+    {
+        id: 'extraG',
+        width: 220, height: 312,
+        baseLeft: 2500, baseTop: 1210,
+        frontImage: './img/sticker5.webp',
+        tooltip: 'Bocetos de estilización inspirados en formas extraídas de lo observado y registrado en el primer cuaderno.'
+    },
+    {
+        id: 'extraH',
+        width: 220, height: 312,
+        baseLeft: 1900, baseTop: 1310,
+        frontImage: './img/sticker6.webp',
+        tooltip: 'Dos pruebas a acuarela encuadrándolas dentro de un marco con línea fina a tinta. Probé para unificar y cohesionar un poco el estilo de todas las acuarelas ya que al estar aprendiendo la técnica el estilo no era siempre el mismo.'
+    },
+    {
+        id: 'extraI',
+        width: 312, height: 200,
+        baseLeft: 1300, baseTop: 1340,
+        frontImage: './img/sticker7.webp',
+        tooltip: 'Pruebas de estilización con un rotulador de punta más gruesa para ver la textura que ofrecía.'
+    },
+    {
+        id: 'extraJ',
+        width: 220, height: 312,
+        baseLeft: 700, baseTop: 1412,
+        frontImage: './img/sticker8.webp',
+        tooltip: 'Prueba que hice en tomar bocetos rapidos en la calle a lápiz y luego pasarlos a subrayador al llegar a casa, pero no me convenció y no seguí con ello.'
+    },
+    {
+        id: 'extraK',
+        width: 312, height: 350,
+        baseLeft: 100, baseTop: 1502,
+        frontImage: './img/sticker9.webp',
+        tooltip: 'Ejercicio de simplificación de formas extraídas del primer cuaderno.'
+    },
+    {
+        id: 'extraL',
+        width: 312, height: 180,
+        baseLeft: 2500, baseTop: 1722,
+        frontImage: './img/sticker10.webp',
+        tooltip: 'Bocetos de personas en la playa. Me di cuenta que no había registrado ninguna figura aún, pero como no me siento aún demasiado fluído con la técnica creo que es algo avanzado por el momento.'
+    },
+    {
+        id: 'extraM',
+        width: 220, height: 312,
+        baseLeft: 1900, baseTop: 1822,
+        frontImage: './img/sticker11.webp',
+        tooltip: 'Pruebas de simplificación formas de algunos elementos arquitéctonicos registrados en el cuaderno #1'
+    },
+    {
+        id: 9,
+        width: 312, height: 220,
+        baseLeft: 1300, baseTop: 1740,
+        frontImage: './img/postal9.webp',
+        backImage: './img/postal9b.webp',
+        tooltip: 'Esstatua del caballo. Está situado en la plaza más grande de Salou y el aspecto más interesante de esta estatua es que está conformada por un conjunto de piezas mecánicas pequeñas que dan una textura muy interesante'
+    },
+    {
+        id: 10,
+        width: 312, height: 220,
+        baseLeft: 100, baseTop: 2052,
+        frontImage: './img/postal10.webp',
+        backImage: './img/postal10b.webp',
+        tooltip: 'Torre Vella. Es el elemento con mayor encanto de Salou (a mi parecer). Ahora es una sala de exposiciones en la que algún día me encantaría exponer obras mías.'
+    },
+    {
+        id: 11,
+        width: 220, height: 312,
+        baseLeft: 2500, baseTop: 2102,
+        frontImage: './img/postal11.webp',
+        backImage: './img/postal11b.webp',
+        tooltip: 'Xalet Fort. Es una de las construcciones más emblemáticas de Salou y su diseño arquitectónico es muy interesante. Ahora es una especie de museo de antigüedades (aún no he ido después de que lo reformaran).'
+    },
+    {
+        id: 'extraP',
+        width: 220, height: 312,
+        baseLeft: 3000, baseTop: 2000,
+        frontImage: './img/sticker12.webp',
+        tooltip: 'Estudio estatua Jaume I'
+    },
+    {
+        id: 'extraQ',
+        width: 220, height: 312,
+        baseLeft: 1000, baseTop: 2052,
+        frontImage: './img/sticker13.webp',
+        tooltip: 'Estudio de una caseta de la ONCE (mi sitio predilecto de Salou) junto con el dibujo de uno de los cartones de Rasca y Gana.'
+    },
+    {
+        id: 'extraR',
+        width: 230, height: 100,
+        baseLeft: 2500, baseTop: 1210,
+        frontImage: './img/sticker14.webp',
+        backImage: './img/sticker14b.webp',
+        tooltip: 'Papel de un Kinder Sorpresa que compré en una de las derivas con mi tía y mi hermana. Me hizo gracia que me tocara SuperMan, ya que con este TFG me he sentido de todo menos Súper... hahaha (risas de deseseración).'
+    },
+    {
+        id: 'extraS',
+        width: 150, height: 150,
+        baseLeft: 700, baseTop: 992,
+        frontImage: './img/sticker15.webp',
+        tooltip: 'Hojas encontradas en el paseo 30 de Octubre de camino a mi casa. Me gustaron porque cuando las recogí tenían un color rojo muy intenso, pero como tardé en digitalizarlas empezaron a perderlo.'
+    },
+    {
+        id: 'extraT',
+        width: 190, height: 90,
+        baseLeft: 100, baseTop: 1502,
+        frontImage: './img/sticker16.webp',
+        tooltip: 'Trozo de packaging de galletas. Mi parte preferida de las derivas han sido los momentos en los que nos parábamos a comer o tomar algo con mis acompañantes. La ilustración urbana puede ser una técnica algo fría y distante al ir con gente (ya que estás casi en tu propio mundo), pero al final ha sido todo lo contrario, se ha vuelto una excusa perfecta para compartir momentos con otras personas y crear recuerdos juntos.'
+    },
+    {
+        id: 'extraU',
+        width: 130, height: 200,
+        baseLeft: 2590, baseTop: 2242,
+        frontImage: './img/sticker17.webp',
+        backImage: './img/sticker17b.webp',
+        tooltip: 'Papel Compro coches que recogí del suelo. Son flyers ya casi característicos de Salou.'
+    },
+    {
+        id: 'extraV',
+        width: 130, height: 200,
+        baseLeft: 1900, baseTop: 470,
+        frontImage: './img/sticker18.webp',
+        backImage: './img/sticker18b.webp',
+        tooltip: 'Papel con oracion. Me pareció casi como una señal, ya que me la encontré tirada (o olvidada) en un banco. Quizás alguien rezó y pensó que ya no la necesitaría más y entonces pasó a acompañarme a mí.'
+    },
+    {
+        id: 'extraW',
+        width: 220, height: 150,
+        baseLeft: 100, baseTop: 662,
+        frontImage: './img/sticker19.webp',
+        tooltip: 'Papel que encontré puesto en un coche y me hizo tanta gracia que no pude evitar cogerlo. Me sabe mal por la persona que seguirá "sin meter más el coche".'
+    },
+    {
+        id: 'extraX',
+        width: 130, height: 130,
+        baseLeft: 1300, baseTop: 1310,
+        frontImage: './img/sticker20.webp',
+        tooltip: 'Post-It de 2 derivas en las que me íban a acompañar mi tia y mi hermana.'
+    },
+    {
+        id: 'extraY',
+        width: 280, height: 150,
+        baseLeft: 120, baseTop: 2252,
+        frontImage: './img/sticker21.webp',
+        tooltip: 'Un Post-It con calendario de la semana del 4-10.'
+    },
+    {
+        id: 'extraZ',
+        width: 220, height: 312,
+        baseLeft: 2590, baseTop: 70,
+        frontImage: './img/sticker22.webp',
+        tooltip: 'Papel en el que esbocé unas ideaciones preliminares que me vinieron para la presentacion.'
+    },
+    {
+        id: 'extraZA',
+        width: 130, height: 130,
+        baseLeft: 3100, baseTop: 690,
+        frontImage: './img/sticker23.webp',
+        tooltip: 'Post-It con una frase que me ha servido mucho para este proyecto. Soy demasiado perfeccionista y me cuesta mucho arrancar siempre y por eso tengo que recordarme continuamente en hacer las cosas primero y luego ya me dedicaré a arreglarlo.'
+    },
+];
+
+            const allItems = items.map(item => {
+                const jitterX = (Math.random() - 0.5) * MAX_JITTER * 2;
+                const jitterY = (Math.random() - 0.5) * MAX_JITTER * 2;
+                return { ...item, left: item.baseLeft + jitterX, top: item.baseTop + jitterY };
+            });
+
+            function createCard(config) {
+                const card = document.createElement('div');
+                card.className = 'image-card';
+                card.dataset.id = config.id;
+                card.style.width = config.width + 'px';
+                card.style.height = config.height + 'px';
+                card.style.left = config.left + 'px';
+                card.style.top = config.top + 'px';
+                card.style.zIndex = 10 + (typeof config.id === 'number' ? config.id : 100 + cardElements.length);
+                card.setAttribute('data-tooltip', config.tooltip || '');
+                card.setAttribute('data-link', config.link || '');
+                card.setAttribute('data-original-left', config.left);
+                card.setAttribute('data-original-top', config.top);
+
+                const inner = document.createElement('div');
+                inner.className = 'card-inner';
+
+                const front = document.createElement('div');
+                front.className = 'card-front';
+                const imgFront = document.createElement('img');
+                imgFront.src = config.frontImage;
+                imgFront.alt = config.tooltip || '';
+                imgFront.draggable = false;
+                imgFront.loading = 'lazy';
+                imgFront.onerror = function() {
+                    this.src = `data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="${config.width}" height="${config.height}"><rect fill="%23444" width="${config.width}" height="${config.height}"/><text x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%23999" font-family="sans-serif" font-size="14">${config.id}</text></svg>`;
+                };
+                front.appendChild(imgFront);
+                inner.appendChild(front);
+
+                if (config.backImage) {
+                    const back = document.createElement('div');
+                    back.className = 'card-back';
+                    const imgBack = document.createElement('img');
+                    imgBack.src = config.backImage;
+                    imgBack.alt = 'Reverso';
+                    imgBack.draggable = false;
+                    imgBack.loading = 'lazy';
+                    back.appendChild(imgBack);
+                    inner.appendChild(back);
+                }
+
+                card.appendChild(inner);
+                canvas.appendChild(card);
+                cardElements.push(card);
+                return card;
+            }
+
+            allItems.forEach(config => createCard(config));
+
+            function computeInitialView() {
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                allItems.forEach(c => {
+                    if (c.left < minX) minX = c.left;
+                    if (c.top < minY) minY = c.top;
+                    if (c.left + c.width > maxX) maxX = c.left + c.width;
+                    if (c.top + c.height > maxY) maxY = c.top + c.height;
+                });
+                const padding = 120;
+                const bboxW = maxX - minX + padding * 2;
+                const bboxH = maxY - minY + padding * 2;
+                const bboxCenterX = (minX + maxX) / 2;
+                const bboxCenterY = (minY + maxY) / 2;
+                const vw = viewport.clientWidth;
+                const vh = viewport.clientHeight;
+                const zoomFit = Math.min(vw / bboxW, vh / bboxH, 1.5);
+                const initialZoom = Math.max(0.5, Math.min(ZOOM_MAX, zoomFit * 1.0));
+                const initialPanX = vw / 2 - bboxCenterX * initialZoom;
+                const initialPanY = vh / 2 - bboxCenterY * initialZoom;
+                return { panX: initialPanX, panY: initialPanY, zoom: initialZoom };
+            }
+
+            const initialView = computeInitialView();
+            panX = initialView.panX;
+            panY = initialView.panY;
+            zoom = initialView.zoom;
+            const savedInitialPanX = panX;
+            const savedInitialPanY = panY;
+            const savedInitialZoom = zoom;
+
+            function updateCanvasTransform() {
+                canvas.style.transform = `translate3d(${panX.toFixed(2)}px, ${panY.toFixed(2)}px, 0) scale(${zoom.toFixed(5)})`;
+                zoomLevelEl.textContent = Math.round(zoom * 100) + '%';
+                const centerX = (viewport.clientWidth / 2 - panX) / zoom;
+                const centerY = (viewport.clientHeight / 2 - panY) / zoom;
+                coordsEl.textContent = `${Math.round(centerX)}, ${Math.round(centerY)}`;
+            }
+            updateCanvasTransform();
+
+            function getCanvasCoordsFromEvent(e) {
+                const rect = viewport.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                const canvasX = (mouseX - panX) / zoom;
+                const canvasY = (mouseY - panY) / zoom;
+                return { mouseX, mouseY, canvasX, canvasY };
+            }
+            function clampZoom(z) { return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)); }
+
+            function showTooltip(text, x, y) {
+                if (!text) return;
+                tooltip.textContent = text;
+                tooltip.style.display = 'block';
+                requestAnimationFrame(() => {
+                    const rect = tooltip.getBoundingClientRect();
+                    let left = x + 18;
+                    let top = y + 18;
+                    if (left + rect.width > window.innerWidth - 10) left = window.innerWidth - rect.width - 10;
+                    if (top + rect.height > window.innerHeight - 10) top = window.innerHeight - rect.height - 10;
+                    tooltip.style.left = left + 'px';
+                    tooltip.style.top = top + 'px';
+                });
+            }
+            function hideTooltip() { tooltip.style.display = 'none'; }
+
+            function applyDragTransform(card, inner, keepFlip) {
+                const tilt = (Math.random() * 6 - 3).toFixed(2);
+                currentTilt = parseFloat(tilt);
+                wasFlippedOnDrag = keepFlip;
+                const baseTransform = keepFlip ? 'rotateY(180deg)' : '';
+                inner.style.transition = 'none';
+                inner.style.transform = `${baseTransform} scale(1.04) rotateZ(${tilt}deg)`;
+            }
+
+            function removeDragTransform(inner, keepFlip) {
+                inner.style.transition = '';
+                inner.style.transform = keepFlip ? 'rotateY(180deg)' : '';
+            }
+
+            viewport.addEventListener('wheel', function(e) {
+                e.preventDefault();
+                const { mouseX, mouseY, canvasX, canvasY } = getCanvasCoordsFromEvent(e);
+                const delta = -e.deltaY * ZOOM_SENSITIVITY;
+                const factor = 1 + Math.abs(delta) * 1.5;
+                const newZoom = delta > 0 ? clampZoom(zoom * factor) : clampZoom(zoom / factor);
+                panX = mouseX - canvasX * newZoom;
+                panY = mouseY - canvasY * newZoom;
+                zoom = newZoom;
+                updateCanvasTransform();
+            }, { passive: false });
+
+            viewport.addEventListener('mousedown', function(e) {
+                const targetCard = e.target.closest('.image-card');
+                if (targetCard) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    isDraggingCard = false;
+                    activeCard = targetCard;
+                    mouseDownOnCard = true;
+                    cardClickStartX = e.clientX;
+                    cardClickStartY = e.clientY;
+                    const { canvasX, canvasY } = getCanvasCoordsFromEvent(e);
+                    dragStartMouseX = canvasX;
+                    dragStartMouseY = canvasY;
+                    dragStartCardLeft = parseFloat(activeCard.style.left) || 0;
+                    dragStartCardTop = parseFloat(activeCard.style.top) || 0;
+                    globalZIndex += 1;
+                    activeCard.style.zIndex = globalZIndex;
+                    body.classList.add('dragging-card');
+                    hideTooltip();
+                    const inner = activeCard.querySelector('.card-inner');
+                    const isFlipped = inner.classList.contains('flipped');
+                    applyDragTransform(activeCard, inner, isFlipped);
+                } else if (e.target === canvas || e.target === viewport || e.target.closest('.canvas')) {
+                    isPanning = true;
+                    body.classList.add('grabbing');
+                    panStartMouseX = e.clientX;
+                    panStartMouseY = e.clientY;
+                    panStartPanX = panX;
+                    panStartPanY = panY;
+                    hideTooltip();
+                }
+            });
+
+            window.addEventListener('mousemove', function(e) {
+                if (!isDraggingCard && !isPanning && !mouseDownOnCard) {
+                    const hoveredCard = e.target.closest('.image-card');
+                    if (hoveredCard) {
+                        const desc = hoveredCard.getAttribute('data-tooltip') || '';
+                        showTooltip(desc, e.clientX, e.clientY);
+                    } else {
+                        hideTooltip();
+                    }
+                } else {
+                    hideTooltip();
+                }
+                if (isPanning) {
+                    const dx = e.clientX - panStartMouseX;
+                    const dy = e.clientY - panStartMouseY;
+                    panX = panStartPanX + dx;
+                    panY = panStartPanY + dy;
+                    updateCanvasTransform();
+                    return;
+                }
+                if (mouseDownOnCard && activeCard) {
+                    const dist = Math.hypot(e.clientX - cardClickStartX, e.clientY - cardClickStartY);
+                    if (dist >= CLICK_THRESHOLD) {
+                        isDraggingCard = true;
+                        activeCard.classList.add('dragging');
+                    }
+                    if (isDraggingCard) {
+                        const { canvasX, canvasY } = getCanvasCoordsFromEvent(e);
+                        const dxCanvas = canvasX - dragStartMouseX;
+                        const dyCanvas = canvasY - dragStartMouseY;
+                        activeCard.style.left = (dragStartCardLeft + dxCanvas) + 'px';
+                        activeCard.style.top = (dragStartCardTop + dyCanvas) + 'px';
+                    }
+                }
+            });
+
+            window.addEventListener('mouseup', function(e) {
+                if (mouseDownOnCard && activeCard) {
+                    const inner = activeCard.querySelector('.card-inner');
+                    const hasBack = inner.querySelector('.card-back') !== null;
+                    if (!isDraggingCard) {
+                        const cardLink = activeCard.getAttribute('data-link');
+                        if (cardLink) {
+                            window.location.href = cardLink;     // navega, ignorando el volteo
+                        } else if (hasBack) {
+                            inner.classList.toggle('flipped');
+                            removeDragTransform(inner, inner.classList.contains('flipped'));
+                        } else {
+                            removeDragTransform(inner, false);
+                        }
+                    } else {
+                        removeDragTransform(inner, wasFlippedOnDrag);
+                        if (wasFlippedOnDrag && hasBack) {
+                            inner.classList.add('flipped');
+                        } else {
+                            inner.classList.remove('flipped');
+                        }
+                        activeCard.classList.remove('dragging');
+                        activeCard.setAttribute('data-original-left', activeCard.style.left);
+                        activeCard.setAttribute('data-original-top', activeCard.style.top);
+                    }
+                }
+                isPanning = false;
+                isDraggingCard = false;
+                mouseDownOnCard = false;
+                activeCard = null;
+                body.classList.remove('grabbing', 'dragging-card');
+                wasFlippedOnDrag = false;
+            });
+
+            let pinchStartDist = 0, pinchStartZoom = 1, pinchStartPanX = 0, pinchStartPanY = 0, pinchMidX = 0, pinchMidY = 0;
+            viewport.addEventListener('touchstart', function(e) {
+                if (e.touches.length === 1) {
+                    const touch = e.touches[0];
+                    const targetCard = touch.target.closest('.image-card');
+                    if (targetCard) {
+                        e.preventDefault();
+                        activeCard = targetCard;
+                        mouseDownOnCard = true;
+                        cardClickStartX = touch.clientX;
+                        cardClickStartY = touch.clientY;
+                        isDraggingCard = false;
+                        const { canvasX, canvasY } = getCanvasCoordsFromEvent(touch);
+                        dragStartMouseX = canvasX;
+                        dragStartMouseY = canvasY;
+                        dragStartCardLeft = parseFloat(activeCard.style.left) || 0;
+                        dragStartCardTop = parseFloat(activeCard.style.top) || 0;
+                        globalZIndex += 1;
+                        activeCard.style.zIndex = globalZIndex;
+                        body.classList.add('dragging-card');
+                        hideTooltip();
+                        const inner = activeCard.querySelector('.card-inner');
+                        const isFlipped = inner.classList.contains('flipped');
+                        applyDragTransform(activeCard, inner, isFlipped);
+                    } else {
+                        isPanning = true;
+                        body.classList.add('grabbing');
+                        panStartMouseX = touch.clientX;
+                        panStartMouseY = touch.clientY;
+                        panStartPanX = panX;
+                        panStartPanY = panY;
+                        hideTooltip();
+                    }
+                } else if (e.touches.length === 2) {
+                    isPanning = false;
+                    isDraggingCard = false;
+                    if (activeCard) {
+                        const inner = activeCard.querySelector('.card-inner');
+                        removeDragTransform(inner, wasFlippedOnDrag);
+                        activeCard.classList.remove('dragging');
+                        activeCard = null;
+                    }
+                    body.classList.remove('grabbing', 'dragging-card');
+                    const t0 = e.touches[0], t1 = e.touches[1];
+                    pinchStartDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+                    pinchStartZoom = zoom;
+                    pinchStartPanX = panX;
+                    pinchStartPanY = panY;
+                    pinchMidX = (t0.clientX + t1.clientX) / 2;
+                    pinchMidY = (t0.clientY + t1.clientY) / 2;
+                }
+            }, { passive: false });
+
+            viewport.addEventListener('touchmove', function(e) {
+                if (e.touches.length === 1 && (isPanning || mouseDownOnCard)) {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    if (isPanning) {
+                        const dx = touch.clientX - panStartMouseX;
+                        const dy = touch.clientY - panStartMouseY;
+                        panX = panStartPanX + dx;
+                        panY = panStartPanY + dy;
+                        updateCanvasTransform();
+                    } else if (mouseDownOnCard && activeCard) {
+                        const dist = Math.hypot(touch.clientX - cardClickStartX, touch.clientY - cardClickStartY);
+                        if (dist >= CLICK_THRESHOLD) {
+                            isDraggingCard = true;
+                            activeCard.classList.add('dragging');
+                        }
+                        if (isDraggingCard) {
+                            const { canvasX, canvasY } = getCanvasCoordsFromEvent(touch);
+                            const dxCanvas = canvasX - dragStartMouseX;
+                            const dyCanvas = canvasY - dragStartMouseY;
+                            activeCard.style.left = (dragStartCardLeft + dxCanvas) + 'px';
+                            activeCard.style.top = (dragStartCardTop + dyCanvas) + 'px';
+                        }
+                    }
+                } else if (e.touches.length === 2) {
+                    e.preventDefault();
+                    const t0 = e.touches[0], t1 = e.touches[1];
+                    const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+                    const scale = dist / pinchStartDist;
+                    const newZoom = clampZoom(pinchStartZoom * scale);
+                    const midX = (t0.clientX + t1.clientX) / 2;
+                    const midY = (t0.clientY + t1.clientY) / 2;
+                    const canvasMidX = (pinchMidX - pinchStartPanX) / pinchStartZoom;
+                    const canvasMidY = (pinchMidY - pinchStartPanY) / pinchStartZoom;
+                    panX = midX - canvasMidX * newZoom;
+                    panY = midY - canvasMidY * newZoom;
+                    zoom = newZoom;
+                    updateCanvasTransform();
+                }
+            }, { passive: false });
+
+            viewport.addEventListener('touchend', function(e) {
+                if (e.touches.length === 0) {
+                    if (mouseDownOnCard && activeCard) {
+                        const inner = activeCard.querySelector('.card-inner');
+                        const hasBack = inner.querySelector('.card-back') !== null;
+                        if (!isDraggingCard) {
+                            if (hasBack) {
+                                inner.classList.toggle('flipped');
+                                removeDragTransform(inner, inner.classList.contains('flipped'));
+                            } else {
+                                removeDragTransform(inner, false);
+                            }
+                        } else {
+                            removeDragTransform(inner, wasFlippedOnDrag);
+                            if (wasFlippedOnDrag && hasBack) {
+                                inner.classList.add('flipped');
+                            } else {
+                                inner.classList.remove('flipped');
+                            }
+                            activeCard.classList.remove('dragging');
+                            activeCard.setAttribute('data-original-left', activeCard.style.left);
+                            activeCard.setAttribute('data-original-top', activeCard.style.top);
+                        }
+                    }
+                    isPanning = false;
+                    isDraggingCard = false;
+                    mouseDownOnCard = false;
+                    activeCard = null;
+                    body.classList.remove('grabbing', 'dragging-card');
+                    wasFlippedOnDrag = false;
+                }
+            });
+
+            resetBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const startPanX = panX, startPanY = panY, startZoom = zoom;
+                const targetPanX = savedInitialPanX, targetPanY = savedInitialPanY, targetZoom = savedInitialZoom;
+                const duration = 500, startTime = performance.now();
+                function animateReset(now) {
+                    const elapsed = now - startTime;
+                    const progress = Math.min(elapsed / duration, 1.0);
+                    const eased = progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+                    panX = startPanX + (targetPanX - startPanX) * eased;
+                    panY = startPanY + (targetPanY - startPanY) * eased;
+                    zoom = startZoom + (targetZoom - startZoom) * eased;
+                    updateCanvasTransform();
+                    if (progress < 1) {
+                        requestAnimationFrame(animateReset);
+                    } else {
+                        cardElements.forEach(card => {
+                            const origLeft = card.getAttribute('data-original-left');
+                            const origTop = card.getAttribute('data-original-top');
+                            card.style.left = origLeft + 'px';
+                            card.style.top = origTop + 'px';
+                            card.style.zIndex = 10 + (parseInt(card.dataset.id) || 30);
+                            const inner = card.querySelector('.card-inner');
+                            if (inner) {
+                                inner.classList.remove('flipped');
+                                inner.style.transform = '';
+                                inner.style.transition = '';
+                            }
+                        });
+                        globalZIndex = 30;
+                    }
+                }
+                requestAnimationFrame(animateReset);
+            });
+
+            window.addEventListener('keydown', function(e) {
+                if (e.key === 'r' || e.key === 'R') {
+                    resetBtn.click();
+                } else if (e.key === '0') {
+                    const vw = viewport.clientWidth, vh = viewport.clientHeight;
+                    const cx = (vw / 2 - panX) / zoom, cy = (vh / 2 - panY) / zoom;
+                    zoom = 1;
+                    panX = vw / 2 - cx;
+                    panY = vh / 2 - cy;
+                    updateCanvasTransform();
+                } else if (e.key === '+' || e.key === '=') {
+                    const vw = viewport.clientWidth, vh = viewport.clientHeight;
+                    const cx = (vw / 2 - panX) / zoom, cy = (vh / 2 - panY) / zoom;
+                    zoom = clampZoom(zoom * 1.15);
+                    panX = vw / 2 - cx * zoom;
+                    panY = vh / 2 - cy * zoom;
+                    updateCanvasTransform();
+                } else if (e.key === '-' || e.key === '_') {
+                    const vw = viewport.clientWidth, vh = viewport.clientHeight;
+                    const cx = (vw / 2 - panX) / zoom, cy = (vh / 2 - panY) / zoom;
+                    zoom = clampZoom(zoom / 1.15);
+                    panX = vw / 2 - cx * zoom;
+                    panY = vh / 2 - cy * zoom;
+                    updateCanvasTransform();
+                }
+            });
+
+            updateCanvasTransform();
+            console.log('📮 Archivo listo: sombras con drop-shadow para respetar transparencias.');
+        })();
+    </script>
+</body>
+</html>
