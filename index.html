@@ -864,37 +864,42 @@
             }, { passive: false });
 
             viewport.addEventListener('touchend', function(e) {
-                if (e.touches.length === 0) {
-                    if (mouseDownOnCard && activeCard) {
-                        const inner = activeCard.querySelector('.card-inner');
-                        const hasBack = inner.querySelector('.card-back') !== null;
-                        if (!isDraggingCard) {
-                            if (hasBack) {
-                                inner.classList.toggle('flipped');
-                                removeDragTransform(inner, inner.classList.contains('flipped'));
-                            } else {
-                                removeDragTransform(inner, false);
-                            }
-                        } else {
-                            removeDragTransform(inner, wasFlippedOnDrag);
-                            if (wasFlippedOnDrag && hasBack) {
-                                inner.classList.add('flipped');
-                            } else {
-                                inner.classList.remove('flipped');
-                            }
-                            activeCard.classList.remove('dragging');
-                            activeCard.setAttribute('data-original-left', activeCard.style.left);
-                            activeCard.setAttribute('data-original-top', activeCard.style.top);
-                        }
-                    }
-                    isPanning = false;
-                    isDraggingCard = false;
-                    mouseDownOnCard = false;
-                    activeCard = null;
-                    body.classList.remove('grabbing', 'dragging-card');
-                    wasFlippedOnDrag = false;
+    if (e.touches.length === 0) {
+        if (mouseDownOnCard && activeCard) {
+            const inner = activeCard.querySelector('.card-inner');
+            const hasBack = inner.querySelector('.card-back') !== null;
+            const cardLink = activeCard.getAttribute('data-link');  // ← LÍNEA NUEVA
+            
+            if (!isDraggingCard) {
+                // PRIORIDAD: si tiene enlace, navegar (igual que en ratón)
+                if (cardLink) {
+                    window.location.href = cardLink;
+                } else if (hasBack) {
+                    inner.classList.toggle('flipped');
+                    removeDragTransform(inner, inner.classList.contains('flipped'));
+                } else {
+                    removeDragTransform(inner, false);
                 }
-            });
+            } else {
+                removeDragTransform(inner, wasFlippedOnDrag);
+                if (wasFlippedOnDrag && hasBack) {
+                    inner.classList.add('flipped');
+                } else {
+                    inner.classList.remove('flipped');
+                }
+                activeCard.classList.remove('dragging');
+                activeCard.setAttribute('data-original-left', activeCard.style.left);
+                activeCard.setAttribute('data-original-top', activeCard.style.top);
+            }
+        }
+        isPanning = false;
+        isDraggingCard = false;
+        mouseDownOnCard = false;
+        activeCard = null;
+        body.classList.remove('grabbing', 'dragging-card');
+        wasFlippedOnDrag = false;
+    }
+});
 
             resetBtn.addEventListener('click', function(e) {
                 e.stopPropagation();
